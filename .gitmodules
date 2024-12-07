@@ -1,0 +1,3 @@
+[submodule "SatMAE"]
+	path = SatMAE
+	url = https://github.com/sustainlab-group/SatMAE.git
