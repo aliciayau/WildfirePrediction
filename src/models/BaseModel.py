@@ -44,6 +44,7 @@ class BaseModel(pl.LightningModule, ABC):
             image, and aggregate the results. This also works for non-square images. 
         """
         super().__init__(*args, **kwargs)
+        self.model = torch.nn.Linear(n_channels, 1)  # A simple model with one output
         self.save_hyperparameters()
 
         if required_img_size is not None:
@@ -248,6 +249,18 @@ class BaseModel(pl.LightningModule, ABC):
             }
         )
         return loss
+    def configure_optimizers(self):
+        optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "monitor": "val_loss",  # Optional: monitor a specific validation metric
+                "interval": "epoch",
+                "frequency": 1,
+            },
+        }
 
     def on_test_epoch_end(self) -> None:
         """_summary_ Log the test PR curve and confusion matrix after predicting all test samples.
