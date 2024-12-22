@@ -70,7 +70,8 @@ class MyLightningCLI(LightningCLI):
         last known values, which is not what we want.
         """
         config_file_name = os.path.join(wandb.run.dir, "cli_config.yaml")
-
+        print(f"Loading configuration from: {cli.config}")
+        
         cfg_string = self.parser.dump(self.config, skip_none=False)
         with open(config_file_name, "w") as f:
             f.write(cfg_string)
@@ -82,46 +83,58 @@ class MyLightningCLI(LightningCLI):
 
 
 def main():
+    # Initialize the CLI with your model and data module classes
+    cli = MyLightningCLI(SMPModel, FireSpreadDataModule, subclass_mode_model=True, save_config_kwargs={"overwrite": True}, parser_kwargs={"parser_mode": "yaml"}, run=False)
 
-    # LightningCLI automatically creates an argparse parser with required arguments and types,
-    # and instantiates the model and datamodule. For this, it's important to import the model and datamodule classes above.
-    cli = MyLightningCLI(BaseModel, FireSpreadDataModule, subclass_mode_model=True, save_config_kwargs={
-        "overwrite": True}, parser_kwargs={"parser_mode": "yaml"}, run=False)
-    cli.wandb_setup()
+    # Print the configuration to verify 'num_workers' and other parameters
+    print("Full Configuration:")
+    print(cli.config)
+
+    # Ensure that the 'num_workers' is correctly set in the configuration
+    if hasattr(cli.config.data, 'num_workers'):
+        print(f"num_workers is set to: {cli.config.data.num_workers}")
+    else:
+        print("num_workers is not set or incorrectly configured.")
+
 
     if cli.config.do_train:
-        cli.trainer.fit(cli.model, cli.datamodule,
-                        ckpt_path=cli.config.ckpt_path)
+        print("Starting training...")
+        cli.trainer.fit(cli.model, cli.datamodule, ckpt_path=cli.config.ckpt_path)
 
-    # If we have trained a model, use the best checkpoint for testing and predicting.
-    # Without this, the model's state at the end of the training would be used, which is not necessarily the best.
-    ckpt = cli.config.ckpt_path
-    if cli.config.do_train:
-        ckpt = "best"
+    # Best checkpoint logic
+    ckpt = cli.config.ckpt_path if not cli.config.do_train else "best"
 
     if cli.config.do_validate:
+        print("Starting validation...")
         cli.trainer.validate(cli.model, cli.datamodule, ckpt_path=ckpt)
 
     if cli.config.do_test:
+        print("Starting testing...")
+        # Assuming train_dataloader and cli.model are initialized
+        train_dataloader = cli.datamodule.train_dataloader()
+        batch = next(iter(train_dataloader))  # Get the first batch
+        x, y = batch
+
+        print(f"Sanity Check: Input shape: {x.shape}")  # Expected: [batch_size, 200, height, width]
+        print(f"Sanity Check: Target shape: {y.shape}")  # Shape of your labels/target
+
+        # Pass the input through the model to check the output shape
+        output = cli.model(x)
+        print(f"Sanity Check: Model output shape: {output.shape}")  # Check the output shape
+
         cli.trainer.test(cli.model, cli.datamodule, ckpt_path=ckpt)
 
     if cli.config.do_predict:
+        print("Generating predictions...")
+        prediction_output = cli.trainer.predict(cli.model, cli.datamodule, ckpt_path=ckpt)
+        x_af = torch.cat([tup[0][:, -1, :, :].squeeze() for tup in prediction_output], axis=0)
+        y = torch.cat([tup[1] for tup in prediction_output], axis=0)
+        y_hat = torch.cat([tup[2] for tup in prediction_output], axis=0)
+        fire_masks_combined = torch.cat([x_af.unsqueeze(0), y_hat.unsqueeze(0), y.unsqueeze(0)], axis=0)
 
-        # Produce predictions, save them in a single file, including ground truth fire targets and input fire masks.
-        prediction_output = cli.trainer.predict(
-            cli.model, cli.datamodule, ckpt_path=ckpt)
-        x_af = torch.cat(
-            list(map(lambda tup: tup[0][:, -1, :, :].squeeze(), prediction_output)), axis=0)
-        y = torch.cat(list(map(lambda tup: tup[1], prediction_output)), axis=0)
-        y_hat = torch.cat(
-            list(map(lambda tup: tup[2], prediction_output)), axis=0)
-        fire_masks_combined = torch.cat(
-            [x_af.unsqueeze(0), y_hat.unsqueeze(0), y.unsqueeze(0)], axis=0)
-
-        predictions_file_name = os.path.join(
-            cli.config.trainer.default_root_dir, f"predictions_{wandb.run.id}.pt")
+        predictions_file_name = os.path.join(cli.config.trainer.default_root_dir, f"predictions_{wandb.run.id}.pt")
         torch.save(fire_masks_combined, predictions_file_name)
-
+        print(f"Predictions saved to {predictions_file_name}")
 
 if __name__ == "__main__":
     main()

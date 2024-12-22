@@ -45,18 +45,20 @@ class BaseModel(pl.LightningModule, ABC):
     def training_step(self, batch, batch_idx):
         x, y = batch
         y_hat = self(x)
+        y = y.unsqueeze(1)  # Add channel dimension to match model output
         loss = self.loss(y_hat, y.float())
         self.log("train_loss", loss, prog_bar=True)
-        self.log("train_f1", self.train_f1(y_hat, y.int()), prog_bar=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
         x, y = batch
         y_hat = self(x)
+        y = y.unsqueeze(1)  # Add channel dimension to match model output
         loss = self.loss(y_hat, y.float())
         self.log("val_loss", loss, prog_bar=True)
-        self.log("val_f1", self.val_f1(y_hat, y.int()), prog_bar=True)
         return loss
+
+
 
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=1e-3)
